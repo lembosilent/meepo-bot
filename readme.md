@@ -5,6 +5,14 @@ This game is crap, I can't win even with cheats. Fuck this game.
 
 p.s. I can update scripts to fix critical errors and nothing more.
 
+### BETA!!!
+
+Reload script if some meepo is inactive. It happens if you spawn one with aghanim and in some rare situations.
+
+### Options
+
+[Meepo bot] -> [Control Hero] - enable to force meepo-bot to control you hero also.
+
 
 ### Meepo-bot
 
