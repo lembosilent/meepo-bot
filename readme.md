@@ -11,7 +11,7 @@ Reload script if some meepo is inactive. It happens if you spawn one with aghani
 
 ### Options
 
-[Meepo bot] -> [Control Hero] - enable to force meepo-bot to control you hero also.
+[Meepo bot] -> [Control Hero] - enable to force meepo-bot to control your hero also.
 
 
 ### Meepo-bot
