@@ -25,6 +25,7 @@ Meepo.THINK_GOLD_RUNE = 6
 Meepo.THINK_VISION_ATTACK = 8
 Meepo.THINK_DEFEND = 9
 Meepo.THINK_POOF_STRIKE = 10
+Meepo.THINK_TEAMFIGHT = 11
 
 
 function Meepo.OnUpdate()
@@ -133,6 +134,9 @@ function Meepo.DebugThink(entity)
     if entity[Meepo.THINK] == Meepo.THINK_VISION_ATTACK then
         return 'VISION ATTACK'
     end
+    if entity[Meepo.THINK] == Meepo.THINK_TEAMFIGHT then
+        return 'TEAMFIGHT'
+    end
     return 'X'
 end
 
@@ -175,6 +179,7 @@ Event:on('death', function(ent)
         Meepo.List[i] = nil
     end
 end)
+
 
 Event:on('respawn', function(ent)
 
@@ -222,36 +227,52 @@ function Meepo.Decision(entity, time)
 
     local origin = Entity.GetAbsOrigin(entity[Meepo.NPC])
     local creeps = NPC.GetUnitsInRadius(entity[Meepo.NPC], DISTANCE_ENEMY, Enum.TeamType.TEAM_ENEMY)
-    local min_distance = 9999
+    local min_distance = 1500
+    local min_distance_hero = 1200
     local target = nil
-    for i, npc in ipairs(creeps) do
-        local target_origin = Entity.GetAbsOrigin(npc)
-        local distance = (origin - target_origin):Length()
-        if not Entity.IsDormant(npc) and Entity.IsAlive(npc) then
-            if NPC.IsLaneCreep(npc) or NPC.IsHero(npc) then
-                if distance < min_distance then
-                    target = npc
-                    min_distance = distance
-                    if NPC.IsHero(npc) and distance < 1200 then
-                        -- entity[Meepo.THINK] = THINK_DEFEND
-                        Meepo.Net(entity, target)
-                        if distance < 350 then
-                            Meepo.PoofStrike(entity)
+    local hero_target = nil
+    if not NPC.HasModifier(entity[Meepo.NPC], "modifier_fountain_aura_buff") then
+        for i, npc in ipairs(creeps) do
+            local target_origin = Entity.GetAbsOrigin(npc)
+            local distance = (origin - target_origin):Length()
+            if not Entity.IsDormant(npc) and Entity.GetHealth(npc) > 0 and NPC.IsKillable(npc) then
+                if NPC.IsLaneCreep(npc) or NPC.IsHero(npc) or NPC.IsStructure(npc) then
+                    if NPC.IsHero(npc) and distance < min_distance_hero then
+                        min_distance_hero = distance
+                        hero_target = npc
+                    end
+                    if distance < min_distance then
+                        target = npc
+                        min_distance = distance
+                        if NPC.IsHero(npc) and distance < 1200 then
+                            -- entity[Meepo.THINK] = THINK_DEFEND
+                            Meepo.Net(entity, target)
+                            if distance < 350 and not NPC.IsStructure(npc) then
+                                Meepo.PoofStrike(entity)
+                            end
                         end
                     end
                 end
             end
         end
     end
+    if hero_target then
+        target = hero_target
+    elseif entity[Meepo.THINK] == Meepo.THINK_TEAMFIGHT then
+        entity[Meepo.THINK] = Meepo.THINK_VISION_ATTACK
+    end
     if target and entity[Meepo.THINK] ~= Meepo.THINK_HEAL then
         entity[Meepo.THINK] = Meepo.THINK_VISION_ATTACK
+        if NPC.IsHero(target) then
+            entity[Meepo.THINK] = Meepo.THINK_TEAMFIGHT
+        end
         Player.AttackTarget(Players.GetLocal(), entity[Meepo.NPC], target)
     elseif not target and entity[Meepo.THINK] == Meepo.THINK_VISION_ATTACK then
         entity[Meepo.THINK] = Meepo.THINK_IDLE
     end
 
     -- check danger
-    if Entity.GetHealth(entity[Meepo.NPC]) * 100 / Entity.GetMaxHealth(entity[Meepo.NPC]) < 37.0 then
+    if Entity.GetHealth(entity[Meepo.NPC]) * 100 / Entity.GetMaxHealth(entity[Meepo.NPC]) < 43.0 then
         for i = 1, Heroes.Count() do
             local enemy = Heroes.Get(i)
             if not NPC.IsIllusion(enemy) and not Entity.IsSameTeam(entity[Meepo.NPC], enemy) and not Entity.IsDormant(enemy) and Entity.IsAlive(enemy) and (Entity.GetAbsOrigin(entity[Meepo.NPC]) - Entity.GetAbsOrigin(enemy)):Length() < DISTANCE_DANGER then
@@ -264,6 +285,56 @@ function Meepo.Decision(entity, time)
         -- 1. Check woods and meepo's level.
         entity[Meepo.THINK] = Meepo.THINK_FOREST
     end
+
+end
+
+
+function Meepo.FastHeal(entity)
+
+    local origin = Entity.GetAbsOrigin(entity[Meepo.NPC])
+    local location = Meepo.BuildingLocation['dire_fountain']
+    if Meepo.TEAM ~= 3 then
+        location = Meepo.BuildingLocation['radiant_fountain']
+    end
+    local entity_distance = (origin - location):Length()
+    if entity_distance < 1775 then
+        return false
+    end
+
+    local min_distance = 9999999
+    local mana = NPC.GetMana(entity[Meepo.NPC])
+
+    -- use teleport
+    local travel = NPC.GetItem(entity[Meepo.NPC], "item_travel_boots", true)
+    if travel and Ability.IsCastable(travel, mana) and Ability.IsReady(travel) and Meepo.IsSuitableToCastSpell(entity[Meepo.NPC]) then
+        local target = 0
+        Ability.CastPosition(travel, location)
+        return true
+    end
+    -- check targets for poof
+    local spell = NPC.GetAbility(entity[Meepo.NPC], "meepo_poof")
+    if spell and Ability.IsCastable(spell, mana) and Ability.IsReady(spell) and Meepo.IsSuitableToCastSpell(entity[Meepo.NPC]) then
+        for i = 1, NPCs.Count() do 
+            local npc = NPCs.Get(i)
+            local name = NPC.GetUnitName(npc)
+            if name ~= nil and Entity.IsSameTeam(entity[Meepo.NPC], npc) and Entity.GetHealth(npc) > 0 then
+                if name == 'npc_dota_hero_meepo' and entity[Meepo.NPC] ~= npc then
+                    local target_origin = Entity.GetAbsOrigin(npc)
+                    local distance = (location - target_origin):Length()
+                    if min_distance > distance and entity_distance < distance then
+                        min_distance = distance
+                        target = npc
+                    end
+                end
+            end
+        end
+        if target then
+            Ability.CastTarget(spell, target)
+            return true
+        end
+    end
+
+    return false
 
 end
 
@@ -301,7 +372,7 @@ function Meepo.PoofStrike(entity)
             local spell = NPC.GetAbility(item[Meepo.NPC], "meepo_poof")
             if health * 100 / Entity.GetMaxHealth(entity[Meepo.NPC]) > 45.0 and mana > 80 * 2 and Ability.IsCastable(spell, mana) and Ability.IsReady(spell) and Meepo.IsSuitableToCastSpell(item[Meepo.NPC]) then
                 Ability.CastTarget(spell, entity[Meepo.NPC])
-                entity[Meepo.LAST_THINK] = time + 1.5
+                entity[Meepo.LAST_THINK] = os.time() + 1.5
                 if entity[Meepo.THINK] ~= Meepo.THINK_HEAL then
                     entity[Meepo.THINK] = Meepo.THINK_POOF_STRIKE
                 end
@@ -413,14 +484,19 @@ function Meepo.think(entity, time)
             if team ~= 3 then
                 location = Meepo.BuildingLocation['radiant_fountain']
             end
-            NPC.MoveTo(entity[Meepo.NPC], location)
+            if not Meepo.FastHeal(entity) then
+                NPC.MoveTo(entity[Meepo.NPC], location)
+            end
             entity[Meepo.LAST_THINK] = time + 2.5
             return
         end
     end
 
     if entity[Meepo.THINK] == Meepo.THINK_FOREST then
-        local only_small = true
+        local only_small = 2
+        if Entity.GetMaxHealth(entity[Meepo.NPC]) > 820 then
+            only_small = 1
+        end
         if Entity.GetMaxHealth(entity[Meepo.NPC]) > 1200 then
             only_small = false
         end
@@ -484,8 +560,10 @@ function Meepo.ClosestCamp(entity, only_small, closest_only)
     local origin = Entity.GetAbsOrigin(entity[Meepo.NPC])
     local min_distance = 99999
     local camps = Meepo.CampLocation
-    if only_small then
+    if only_small == 1 then
         camps = Meepo.MiniCampLocation
+    elseif only_small == 2 then
+        camps = Meepo.MicroCampLocation
     end
     if closest_only then
         for i, camp in pairs(camps) do
@@ -571,6 +649,14 @@ Meepo.MiniCampLocation = {
     dire_mid_camp_1 = Vector(-1650, 3968, 256),
     -- dire_mid_camp_2 = Vector(1100, 3500, 384),
     dire_mid_camp_3 = Vector(2800, 100, 384),
+}
+
+
+Meepo.MicroCampLocation = {
+    radiant_small_camp = Vector(3250, -4500, 256),
+    radiant_mid_camp_1 = Vector(-3900, 600, 256),
+    dire_small_camp = Vector(-3050, 4800, 384),
+    dire_mid_camp_1 = Vector(-1650, 3968, 256),
 }
 
 
